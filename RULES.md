@@ -133,14 +133,3 @@ Letters:
 7. ✓ No 3×3 black square blocks
 8. ✓ At least one Across and one Down word
 9. ✓ Player must use ALL provided letters to win
-
----
-
-## Future Considerations
-
-- **Word frequency filtering**: Prefer common words over obscure dictionary entries
-- **Blacklist**: Filter out potentially inappropriate words
-- **Clue generation**: Separate script/system to generate clues for each word
-- **Difficulty scaling**: Adjust grid size, letter count, or word obscurity
-- **Daily puzzle**: Generate one puzzle per day with consistent seed
-- **JSON export**: Output puzzle data in a format your frontend can consume
