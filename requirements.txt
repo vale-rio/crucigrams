@@ -1,1 +1,2 @@
 wordfreq
+english-words
