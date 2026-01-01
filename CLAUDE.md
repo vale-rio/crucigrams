@@ -23,19 +23,28 @@ pip install -r requirements.txt
 # Basic usage
 python scheme_generator.py
 
-# With options
-python scheme_generator.py --size 7 --min-letters 30 --max-letters 34 --max-two-letter 3 --attempts 500
+# With options (long flags)
+python scheme_generator.py --grid-size 7 --min-total-letters 30 --max-total-letters 34 --two-letter-max 3 --attempts 500
+
+# Same with short flags
+python scheme_generator.py -gs 7 -mntl 30 -mxtl 34 -tlm 3 -a 500
 
 # Word rarity levels (easy=common words, medium=standard, hard=obscure)
-python scheme_generator.py --word-rarity easy    # ~17K words (Zipf ≥ 3)
-python scheme_generator.py --word-rarity medium  # ~37K words (Zipf ≥ 2)
-python scheme_generator.py --word-rarity hard    # ~234K words (Zipf ≥ 1)
+python scheme_generator.py -wr easy    # ~17K words (Zipf ≥ 3)
+python scheme_generator.py -wr medium  # ~37K words (Zipf ≥ 2)
+python scheme_generator.py -wr hard    # ~234K words (Zipf ≥ 1)
 
 # Allow obscure 2-letter words (normally filtered to 39 common ones)
-python scheme_generator.py --allow-obscure-two-letter
+python scheme_generator.py -ao2l
 
 # Disable offensive word filtering
-python scheme_generator.py --no-blacklist
+python scheme_generator.py -nb
+
+# Require minimum number of long words (6+ characters by default)
+python scheme_generator.py -mlwr 2
+
+# Customize what counts as "long" (e.g., 7+ characters)
+python scheme_generator.py --min-long-words-required 2 --long-word-min-length 7
 ```
 
 ## Architecture
@@ -64,9 +73,10 @@ A valid crucigram must satisfy:
 1. **Letter count**: 30-34 letters in 7×7 grid
 2. **Valid words**: Every 2+ letter sequence (horizontal/vertical) must be a dictionary word
 3. **Two-letter limit**: Maximum 3 two-letter words
-4. **No repeats**: Each word appears exactly once
-5. **Connectivity**: All letters form one connected group (4-directional)
-6. **No 3×3 blacks**: No 3×3 region of all black squares
+4. **Long word minimum**: Optional minimum count of 6+ character words (`--min-long-words`)
+5. **No repeats**: Each word appears exactly once
+6. **Connectivity**: All letters form one connected group (4-directional)
+7. **No 3×3 blacks**: No 3×3 region of all black squares
 
 ---
 

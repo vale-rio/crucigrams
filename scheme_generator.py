@@ -9,6 +9,34 @@ Generates dense crossword-style puzzles where:
 - Maximum 3 two-letter words
 - No 3x3 black blocks
 - No repeated words
+
+Command-Line Flags
+------------------
+Flag                          Short   Default   Description
+----------------------------  ------  --------  -----------------------------------------
+--grid-size N                 -gs     7         Grid size (NxN)
+--min-total-letters N         -mntl   30        Minimum letter count
+--max-total-letters N         -mxtl   34        Maximum letter count
+--two-letter-max N            -tlm    3         Maximum 2-letter words allowed
+--attempts N                  -a      500       Max generation attempts before giving up
+--word-rarity LEVEL           -wr     (none)    Filter by word frequency:
+                                                  easy   = common words (Zipf >= 3)
+                                                  medium = standard (Zipf >= 2)
+                                                  hard   = obscure allowed (Zipf >= 1)
+--word-preference MODE        -wp     common    Word selection order:
+                                                  common   = try common words first
+                                                  uncommon = try rare words first
+                                                  random   = randomized
+--min-long-words-required N   -mlwr   0         Minimum count of long words required
+--long-word-min-length N      -lwml   6         Chars needed to count as "long"
+--allow-obscure-two-letter    -ao2l   (flag)    Include obscure 2-letter words
+--no-blacklist                -nb     (flag)    Disable offensive word filtering
+
+Examples
+--------
+python scheme_generator.py
+python scheme_generator.py -wr easy -mlwr 2
+python scheme_generator.py --min-long-words-required 3 --long-word-min-length 7
 """
 
 import random
@@ -189,7 +217,11 @@ class CrucigramGrid:
     def count_two_letter_words(self) -> int:
         """Count words of exactly 2 letters."""
         return sum(1 for w in self.get_word_strings() if len(w) == 2)
-    
+
+    def count_long_words(self, min_length: int = 6) -> int:
+        """Count words with length >= min_length."""
+        return sum(1 for w in self.get_word_strings() if len(w) >= min_length)
+
     def has_repeated_words(self) -> bool:
         """Check for duplicate words."""
         words = self.get_word_strings()
@@ -250,7 +282,9 @@ class CrucigramGrid:
         has_down = any(d == "DOWN" for _, _, _, d in words)
         return has_across and has_down
     
-    def is_valid_complete(self, min_letters: int = 30, max_letters: int = 34, max_two_letter: int = 3) -> bool:
+    def is_valid_complete(self, min_letters: int = 30, max_letters: int = 34,
+                          max_two_letter: int = 3, min_long_words: int = 0,
+                          long_word_length: int = 6) -> bool:
         """Full validation for a completed grid."""
         letter_count = self.count_letters()
         if letter_count < min_letters or letter_count > max_letters:
@@ -258,6 +292,8 @@ class CrucigramGrid:
         if not self.all_words_valid():
             return False
         if self.count_two_letter_words() > max_two_letter:
+            return False
+        if self.count_long_words(long_word_length) < min_long_words:
             return False
         if self.has_repeated_words():
             return False
@@ -327,6 +363,7 @@ class CrucigramGrid:
         print(f"Stats:")
         print(f"  Total words: {len(words)}")
         print(f"  Two-letter words: {self.count_two_letter_words()}")
+        print(f"  Long words (6+ chars): {self.count_long_words(6)}")
 
 
 # ============================================================================
@@ -337,11 +374,14 @@ class CrucigramGenerator:
     def __init__(self, size: int = 7, min_letters: int = 30, max_letters: int = 34,
                  max_two_letter: int = 3, common_two_letter_only: bool = True,
                  word_rarity: str | None = None, use_blacklist: bool = True,
-                 word_preference: str = 'common'):
+                 word_preference: str = 'common', min_long_words: int = 0,
+                 long_word_length: int = 6):
         self.size = size
         self.min_letters = min_letters
         self.max_letters = max_letters
         self.max_two_letter = max_two_letter
+        self.min_long_words = min_long_words
+        self.long_word_length = long_word_length
         self.word_rarity = word_rarity
         self.word_preference = word_preference  # 'common', 'uncommon', or 'random'
 
@@ -637,17 +677,18 @@ class CrucigramGenerator:
     def _try_finalize(self, grid: CrucigramGrid) -> Optional[CrucigramGrid]:
         """Try to finalize the grid by filling blacks and validating."""
         final = grid.copy()
-        
+
         # Fill all None with black
         for row in range(final.size):
             for col in range(final.size):
                 if final.grid[row][col] is None:
                     final.grid[row][col] = '#'
-        
+
         # Validate
-        if final.is_valid_complete(self.min_letters, self.max_letters, self.max_two_letter):
+        if final.is_valid_complete(self.min_letters, self.max_letters, self.max_two_letter,
+                                   self.min_long_words, self.long_word_length):
             return final
-        
+
         return None
 
 
@@ -659,17 +700,28 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Generate Crucigram puzzles')
-    parser.add_argument('--size', type=int, default=7, help='Grid size (default: 7)')
-    parser.add_argument('--min-letters', type=int, default=30, help='Minimum letters (default: 30)')
-    parser.add_argument('--max-letters', type=int, default=34, help='Maximum letters (default: 34)')
-    parser.add_argument('--max-two-letter', type=int, default=3, help='Max 2-letter words (default: 3)')
-    parser.add_argument('--attempts', type=int, default=500, help='Max generation attempts (default: 500)')
-    parser.add_argument('--allow-obscure-two-letter', action='store_true', help='Allow obscure 2-letter words')
-    parser.add_argument('--word-rarity', choices=['easy', 'medium', 'hard'],
+    parser.add_argument('-gs', '--grid-size', type=int, default=7,
+                        help='Grid size (default: 7)')
+    parser.add_argument('-mntl', '--min-total-letters', type=int, default=30,
+                        help='Minimum letters (default: 30)')
+    parser.add_argument('-mxtl', '--max-total-letters', type=int, default=34,
+                        help='Maximum letters (default: 34)')
+    parser.add_argument('-tlm', '--two-letter-max', type=int, default=3,
+                        help='Max 2-letter words (default: 3)')
+    parser.add_argument('-a', '--attempts', type=int, default=500,
+                        help='Max generation attempts (default: 500)')
+    parser.add_argument('-ao2l', '--allow-obscure-two-letter', action='store_true',
+                        help='Allow obscure 2-letter words')
+    parser.add_argument('-wr', '--word-rarity', choices=['easy', 'medium', 'hard'],
                         help='Word difficulty: easy (common), medium (standard), hard (obscure)')
-    parser.add_argument('--word-preference', choices=['common', 'uncommon', 'random'], default='common',
+    parser.add_argument('-wp', '--word-preference', choices=['common', 'uncommon', 'random'], default='common',
                         help='Which words to try first: common (default), uncommon, or random')
-    parser.add_argument('--no-blacklist', action='store_true', help='Disable offensive word filtering')
+    parser.add_argument('-nb', '--no-blacklist', action='store_true',
+                        help='Disable offensive word filtering')
+    parser.add_argument('-mlwr', '--min-long-words-required', type=int, default=0,
+                        help='Minimum number of long words required (default: 0)')
+    parser.add_argument('-lwml', '--long-word-min-length', type=int, default=6,
+                        help='Minimum characters for a word to count as "long" (default: 6)')
     args = parser.parse_args()
     
     print("Crucigram Puzzle Generator")
@@ -678,24 +730,28 @@ if __name__ == "__main__":
     print("Loading dictionary...")
     
     generator = CrucigramGenerator(
-        size=args.size,
-        min_letters=args.min_letters,
-        max_letters=args.max_letters,
-        max_two_letter=args.max_two_letter,
+        size=args.grid_size,
+        min_letters=args.min_total_letters,
+        max_letters=args.max_total_letters,
+        max_two_letter=args.two_letter_max,
         common_two_letter_only=not args.allow_obscure_two_letter,
         word_rarity=args.word_rarity,
         use_blacklist=not args.no_blacklist,
-        word_preference=args.word_preference
+        word_preference=args.word_preference,
+        min_long_words=args.min_long_words_required,
+        long_word_length=args.long_word_min_length
     )
 
     print(f"Dictionary loaded: {len(generator.dictionary)} words")
-    print(f"Generating {args.size}×{args.size} puzzle with {args.min_letters}-{args.max_letters} letters...")
-    print(f"Max 2-letter words: {args.max_two_letter}")
+    print(f"Generating {args.grid_size}×{args.grid_size} puzzle with {args.min_total_letters}-{args.max_total_letters} letters...")
+    print(f"Max 2-letter words: {args.two_letter_max}")
     print(f"Using common 2-letter words only: {not args.allow_obscure_two_letter}")
     if args.word_rarity:
         print(f"Word rarity: {args.word_rarity} (min Zipf: {RARITY_THRESHOLDS[args.word_rarity]})")
     print(f"Word preference: {args.word_preference}")
     print(f"Blacklist: {'disabled' if args.no_blacklist else 'enabled'}")
+    if args.min_long_words_required > 0:
+        print(f"Min long words: {args.min_long_words_required} (>= {args.long_word_min_length} chars)")
     print()
     
     grid = generator.generate(max_attempts=args.attempts)
