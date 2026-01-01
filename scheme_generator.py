@@ -15,7 +15,6 @@ import random
 from typing import Optional
 from collections import Counter
 from pathlib import Path
-from english_words import get_english_words_set
 from wordfreq import zipf_frequency
 
 
@@ -50,27 +49,28 @@ def load_blacklist() -> set[str]:
 
 
 def load_dictionary(common_only: bool = False, blacklist: set[str] | None = None) -> set[str]:
-    """Load and filter the word dictionary."""
-    words = get_english_words_set(['web2'], lower=True)
+    """Load and filter the word dictionary from data/words.txt."""
+    words_path = Path(__file__).parent / 'data' / 'words.txt'
     blacklist = blacklist or set()
 
-    # Convert to uppercase and filter to only alphabetic words
+    with open(words_path) as f:
+        all_words = {line.strip() for line in f if line.strip()}
+
+    # Filter words
     valid_words = set()
-    for word in words:
-        upper = word.upper()
-        if upper.isalpha() and len(upper) >= 2:
-            # Skip blacklisted words
-            if upper in blacklist:
-                continue
-            # For 2-letter words, optionally filter to common ones
-            if len(upper) == 2:
-                if common_only:
-                    if upper in COMMON_TWO_LETTER:
-                        valid_words.add(upper)
-                else:
-                    valid_words.add(upper)
+    for word in all_words:
+        # Skip blacklisted words
+        if word in blacklist:
+            continue
+        # For 2-letter words, optionally filter to common ones
+        if len(word) == 2:
+            if common_only:
+                if word in COMMON_TWO_LETTER:
+                    valid_words.add(word)
             else:
-                valid_words.add(upper)
+                valid_words.add(word)
+        else:
+            valid_words.add(word)
 
     return valid_words
 
@@ -337,15 +337,13 @@ class CrucigramGenerator:
     def __init__(self, size: int = 7, min_letters: int = 30, max_letters: int = 34,
                  max_two_letter: int = 3, common_two_letter_only: bool = True,
                  word_rarity: str | None = None, use_blacklist: bool = True,
-                 prefer_uncommon: bool = False):
+                 word_preference: str = 'common'):
         self.size = size
         self.min_letters = min_letters
         self.max_letters = max_letters
         self.max_two_letter = max_two_letter
         self.word_rarity = word_rarity
-        self.prefer_uncommon = prefer_uncommon
-        # Multiplier for frequency sorting: -1 = common first, +1 = uncommon first
-        self._freq_sort_sign = 1 if prefer_uncommon else -1
+        self.word_preference = word_preference  # 'common', 'uncommon', or 'random'
 
         # Load blacklist and dictionary
         blacklist = load_blacklist() if use_blacklist else set()
@@ -374,19 +372,26 @@ class CrucigramGenerator:
                 self.words_by_length[length] = []
             self.words_by_length[length].append(word)
 
-        # Sort by frequency with randomization within bands
-        # _freq_sort_sign: -1 = common first (descending), +1 = uncommon first (ascending)
-        sign = self._freq_sort_sign
+        # Sort/shuffle words based on preference
         for length in self.words_by_length:
-            self.words_by_length[length].sort(
-                key=lambda w, s=sign: (s * self.word_frequencies.get(w, 0), random.random())
-            )
+            if word_preference == 'random':
+                random.shuffle(self.words_by_length[length])
+            else:
+                # -1 = common first (descending), +1 = uncommon first (ascending)
+                sign = 1 if word_preference == 'uncommon' else -1
+                self.words_by_length[length].sort(
+                    key=lambda w, s=sign: (s * self.word_frequencies.get(w, 0), random.random())
+                )
 
-        # Build letter->words index for faster crossing, sorted by frequency
+        # Build letter->words index for faster crossing
         self.words_with_letter: dict[str, list[str]] = {}
         for letter in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
             words_list = [w for w in self.dictionary if letter in w and 3 <= len(w) <= 7]
-            words_list.sort(key=lambda w, s=sign: (s * self.word_frequencies.get(w, 0), random.random()))
+            if word_preference == 'random':
+                random.shuffle(words_list)
+            else:
+                sign = 1 if word_preference == 'uncommon' else -1
+                words_list.sort(key=lambda w, s=sign: (s * self.word_frequencies.get(w, 0), random.random()))
             self.words_with_letter[letter] = words_list
     
     def generate(self, max_attempts: int = 1000, verbose: bool = True) -> Optional[CrucigramGrid]:
@@ -500,9 +505,12 @@ class CrucigramGenerator:
     def _try_add_crossing_word(self, grid: CrucigramGrid, row: int, col: int, letter: str, direction: str) -> bool:
         """Try to add a word that crosses through (row, col) with the given letter."""
         candidates = self.words_with_letter.get(letter, [])[:]  # Copy to avoid mutating
-        # Sort by frequency band (int of Zipf score), randomize within bands
-        sign = self._freq_sort_sign
-        candidates.sort(key=lambda w: (sign * int(self.word_frequencies.get(w, 0)), random.random()))
+        # Sort/shuffle based on word preference
+        if self.word_preference == 'random':
+            random.shuffle(candidates)
+        else:
+            sign = 1 if self.word_preference == 'uncommon' else -1
+            candidates.sort(key=lambda w: (sign * int(self.word_frequencies.get(w, 0)), random.random()))
 
         for word in candidates[:100]:  # Limit search
             # Find all positions where 'letter' appears in word
@@ -659,8 +667,8 @@ if __name__ == "__main__":
     parser.add_argument('--allow-obscure-two-letter', action='store_true', help='Allow obscure 2-letter words')
     parser.add_argument('--word-rarity', choices=['easy', 'medium', 'hard'],
                         help='Word difficulty: easy (common), medium (standard), hard (obscure)')
-    parser.add_argument('--prefer-uncommon', action='store_true',
-                        help='Prefer uncommon words first (default: prefer common words)')
+    parser.add_argument('--word-preference', choices=['common', 'uncommon', 'random'], default='common',
+                        help='Which words to try first: common (default), uncommon, or random')
     parser.add_argument('--no-blacklist', action='store_true', help='Disable offensive word filtering')
     args = parser.parse_args()
     
@@ -677,7 +685,7 @@ if __name__ == "__main__":
         common_two_letter_only=not args.allow_obscure_two_letter,
         word_rarity=args.word_rarity,
         use_blacklist=not args.no_blacklist,
-        prefer_uncommon=args.prefer_uncommon
+        word_preference=args.word_preference
     )
 
     print(f"Dictionary loaded: {len(generator.dictionary)} words")
@@ -686,7 +694,7 @@ if __name__ == "__main__":
     print(f"Using common 2-letter words only: {not args.allow_obscure_two_letter}")
     if args.word_rarity:
         print(f"Word rarity: {args.word_rarity} (min Zipf: {RARITY_THRESHOLDS[args.word_rarity]})")
-    print(f"Word preference: {'uncommon first' if args.prefer_uncommon else 'common first'}")
+    print(f"Word preference: {args.word_preference}")
     print(f"Blacklist: {'disabled' if args.no_blacklist else 'enabled'}")
     print()
     
